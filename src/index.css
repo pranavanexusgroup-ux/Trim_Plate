@@ -113,6 +113,45 @@
   animation: tp-scale-fade 0.24s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
+@keyframes tp-pulse-glow {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(11, 143, 77, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgba(11, 143, 77, 0);
+  }
+}
+
+@keyframes tp-pulse-amber {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(217, 119, 6, 0.45);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgba(217, 119, 6, 0);
+  }
+}
+
+@keyframes tp-bounce-subtle {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-3px);
+  }
+}
+
+.animate-tp-pulse-glow {
+  animation: tp-pulse-glow 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+.animate-tp-pulse-amber {
+  animation: tp-pulse-amber 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+.animate-tp-bounce-subtle {
+  animation: tp-bounce-subtle 1.8s ease-in-out infinite;
+}
+
 .tp-edge-fade-mask {
   -webkit-mask-image: linear-gradient(
     to right,

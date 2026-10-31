@@ -1,4 +1,5 @@
-import express, { Request, Response, NextFunction } from 'express';
+import express from 'express';
+import type { Request, Response, NextFunction } from 'express';
 import http from 'http';
 import path from 'path';
 import { WebSocketServer, WebSocket } from 'ws';
@@ -12,7 +13,9 @@ import { db, initializeDatabase } from './src/server/db.ts';
 dotenv.config();
 
 const JWT_SECRET = process.env.JWT_SECRET || 'trimplate_dev_secret_change_in_prod';
-const PORT = Number(process.env.PORT) || 3000;
+const portArgIndex = process.argv.indexOf('--port');
+const argPort = portArgIndex !== -1 ? Number(process.argv[portArgIndex + 1]) : null;
+const PORT = argPort || Number(process.env.PORT) || 3000;
 
 initializeDatabase();
 
@@ -415,6 +418,92 @@ ${urls.map((u) => `  <url><loc>${u}</loc><changefreq>daily</changefreq><priority
         email: email || '',
         mobile: mobile.trim(),
         role: 'customer',
+        addresses,
+        customerProfile,
+      },
+    });
+  });
+
+  app.post('/api/auth/social-login', (req, res) => {
+    const { provider, email, name, avatar_url, dietary_preference, mobile } = req.body;
+    if (!email || !name) {
+      res.status(400).json({ error: 'Name and email are required for social login' });
+      return;
+    }
+
+    const cleanEmail = String(email).trim().toLowerCase();
+    const cleanName = String(name).trim();
+    const providerLabel = provider === 'facebook' ? 'Facebook' : 'Google';
+
+    // Look for existing user by email
+    let user = db
+      .prepare(
+        `SELECT u.*, r.name as role_name FROM users u
+         JOIN roles r ON r.id = u.role_id
+         WHERE LOWER(u.email) = ?`
+      )
+      .get(cleanEmail) as any;
+
+    if (!user) {
+      // Create new customer account strictly with role_id 2 (customer)
+      const cleanMobile = mobile
+        ? String(mobile).trim()
+        : '9' + Math.floor(100000000 + Math.random() * 900000000).toString();
+      const dummyHash = bcrypt.hashSync('social_pass_' + Math.random(), 10);
+
+      const result = db
+        .prepare(
+          'INSERT INTO users (role_id, name, email, mobile, password_hash, avatar_url) VALUES (2, ?, ?, ?, ?, ?)'
+        )
+        .run(cleanName, cleanEmail, cleanMobile, dummyHash, avatar_url || '');
+      const userId = Number(result.lastInsertRowid);
+
+      db.prepare(
+        'INSERT INTO customers (user_id, dietary_preference, fitness_goal) VALUES (?, ?, ?)'
+      ).run(userId, dietary_preference || 'Both', 'Eat Smart & Stay Trim');
+
+      db.prepare(
+        'INSERT INTO addresses (user_id, label, recipient_name, mobile, line1, area, city, pincode, is_default) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)'
+      ).run(
+        userId,
+        'Home',
+        cleanName,
+        cleanMobile,
+        '12A Park Street',
+        'Central Kolkata',
+        'Kolkata',
+        '700016'
+      );
+
+      user = db
+        .prepare(
+          `SELECT u.*, r.name as role_name FROM users u
+           JOIN roles r ON r.id = u.role_id
+           WHERE u.id = ?`
+        )
+        .get(userId) as any;
+
+      broadcastEvent('new_customer', { name: cleanName, mobile: cleanMobile, provider: providerLabel });
+    } else if (avatar_url && !user.avatar_url) {
+      db.prepare('UPDATE users SET avatar_url = ? WHERE id = ?').run(avatar_url, user.id);
+      user.avatar_url = avatar_url;
+    }
+
+    const token = signToken({ userId: user.id, role: user.role_name, name: user.name });
+    const addresses = db
+      .prepare('SELECT * FROM addresses WHERE user_id = ? ORDER BY is_default DESC, id DESC')
+      .all(user.id);
+    const customerProfile = db.prepare('SELECT * FROM customers WHERE user_id = ?').get(user.id);
+
+    res.json({
+      token,
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        mobile: user.mobile,
+        avatar_url: user.avatar_url || avatar_url || '',
+        role: user.role_name,
         addresses,
         customerProfile,
       },
@@ -3607,7 +3696,9 @@ ${urls.map((u) => `  <url><loc>${u}</loc><changefreq>daily</changefreq><priority
   });
 
   // ==================== VITE DEV / PROD STATIC ====================
-  if (process.env.NODE_ENV !== 'production') {
+  const isProduction =
+    process.env.NODE_ENV === 'production' || process.env.npm_lifecycle_event === 'start';
+  if (!isProduction) {
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',

@@ -25,6 +25,7 @@ export interface UserProfile {
   name: string;
   email: string;
   mobile: string;
+  avatar_url?: string;
   role: 'admin' | 'customer';
   addresses: Address[];
   customerProfile?: CustomerProfile;

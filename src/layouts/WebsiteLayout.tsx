@@ -690,8 +690,8 @@ export function WebsiteLayout() {
               <a href="/sitemap.xml" target="_blank" rel="noreferrer" className="hover:text-white">
                 Sitemap
               </a>
-              <Link to="/admin" className="hover:text-[#8CCB16] font-medium">
-                Admin CMS Portal
+              <Link to="/admin" className="hover:text-[#8CCB16] font-medium transition-colors">
+                Admin Portal Login
               </Link>
             </div>
           </div>

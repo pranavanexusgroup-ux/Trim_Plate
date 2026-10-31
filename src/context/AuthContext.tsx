@@ -15,6 +15,14 @@ interface AuthContextValue {
     password: string;
     dietary_preference: string;
   }) => Promise<UserProfile>;
+  socialLogin: (payload: {
+    provider: 'google' | 'facebook';
+    email: string;
+    name: string;
+    avatar_url?: string;
+    dietary_preference?: string;
+    mobile?: string;
+  }) => Promise<UserProfile>;
   quickAccess: (mode: 'customer' | 'admin') => Promise<UserProfile>;
   refreshProfile: () => Promise<void>;
   addAddress: (addr: Omit<Address, 'id' | 'user_id'>) => Promise<void>;
@@ -82,6 +90,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return data.user;
   };
 
+  const socialLogin = async (payload: {
+    provider: 'google' | 'facebook';
+    email: string;
+    name: string;
+    avatar_url?: string;
+    dietary_preference?: string;
+    mobile?: string;
+  }) => {
+    const { data } = await api.post<{ token: string; user: UserProfile }>('/auth/social-login', payload);
+    localStorage.setItem('tp_token', data.token);
+    setUser(data.user);
+    return data.user;
+  };
+
   const quickAccess = async (mode: 'customer' | 'admin') => {
     const { data } = await api.post<{ token: string; user: UserProfile }>('/auth/quick-access', { mode });
     localStorage.setItem('tp_token', data.token);
@@ -113,6 +135,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setSelectedLocation,
         login,
         register,
+        socialLogin,
         quickAccess,
         refreshProfile,
         addAddress,

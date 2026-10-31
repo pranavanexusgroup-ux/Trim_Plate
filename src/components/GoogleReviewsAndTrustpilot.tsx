@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import {
   ChevronLeft,
@@ -90,6 +90,10 @@ export function AboveFooterGoogleReviewsSection() {
   const [cardsPerView, setCardsPerView] = useState<number>(3);
   const [activeIndex, setActiveIndex] = useState<number>(0);
   const [paused, setPaused] = useState<boolean>(false);
+  const [touchStartX, setTouchStartX] = useState<number | null>(null);
+  const [touchDeltaX, setTouchDeltaX] = useState<number>(0);
+  const [isDragging, setIsDragging] = useState<boolean>(false);
+  const autoSlideTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Write Review Modal State (Individual one-time item review per order)
   const [modalOpen, setModalOpen] = useState<boolean>(false);
@@ -123,13 +127,21 @@ export function AboveFooterGoogleReviewsSection() {
 
   const maxStartIndex = Math.max(0, reviewsList.length - cardsPerView);
 
+  const goNext = useCallback(() => {
+    setActiveIndex((prev) => (prev >= maxStartIndex ? 0 : prev + 1));
+  }, [maxStartIndex]);
+
+  const goPrev = useCallback(() => {
+    setActiveIndex((prev) => (prev <= 0 ? maxStartIndex : prev - 1));
+  }, [maxStartIndex]);
+
   useEffect(() => {
     if (activeIndex > maxStartIndex) {
       setActiveIndex(0);
     }
   }, [activeIndex, maxStartIndex]);
 
-  // Smooth Auto-Sliding Timer
+  // Smooth Auto-Sliding Timer with Pause On Hover / Drag
   useEffect(() => {
     if (!isEnabled || paused || modalOpen || reviewsList.length <= cardsPerView) return;
     const prefersReduced =
@@ -138,12 +150,44 @@ export function AboveFooterGoogleReviewsSection() {
       window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     if (prefersReduced) return;
 
-    const timer = setInterval(() => {
-      setActiveIndex((prev) => (prev >= maxStartIndex ? 0 : prev + 1));
-    }, 3800);
+    autoSlideTimerRef.current = setInterval(() => {
+      goNext();
+    }, 4200);
 
-    return () => clearInterval(timer);
-  }, [isEnabled, paused, modalOpen, reviewsList.length, cardsPerView, maxStartIndex]);
+    return () => {
+      if (autoSlideTimerRef.current) clearInterval(autoSlideTimerRef.current);
+    };
+  }, [isEnabled, paused, modalOpen, reviewsList.length, cardsPerView, goNext]);
+
+  const handleTouchStart = (e: React.TouchEvent | React.MouseEvent) => {
+    setPaused(true);
+    const clientX = 'touches' in e ? e.touches[0].clientX : (e as React.MouseEvent).clientX;
+    setTouchStartX(clientX);
+    setTouchDeltaX(0);
+    setIsDragging(true);
+  };
+
+  const handleTouchMove = (e: React.TouchEvent | React.MouseEvent) => {
+    if (touchStartX === null) return;
+    const clientX = 'touches' in e ? e.touches[0].clientX : (e as React.MouseEvent).clientX;
+    const delta = clientX - touchStartX;
+    // Limit delta range for smooth dragging feel
+    setTouchDeltaX(Math.max(-120, Math.min(120, delta)));
+  };
+
+  const handleTouchEnd = () => {
+    if (touchStartX !== null) {
+      if (touchDeltaX < -35) {
+        goNext();
+      } else if (touchDeltaX > 35) {
+        goPrev();
+      }
+    }
+    setTouchStartX(null);
+    setTouchDeltaX(0);
+    setIsDragging(false);
+    setTimeout(() => setPaused(false), 2500);
+  };
 
   const isOrderItemReviewed = (
     orderId: number,
@@ -332,24 +376,28 @@ export function AboveFooterGoogleReviewsSection() {
             </a>
 
             {reviewsList.length > cardsPerView && (
-              <div className="hidden sm:inline-flex items-center gap-1.5 pl-1">
+              <div className="flex items-center gap-1.5 pl-1">
                 <button
                   type="button"
-                  onClick={() =>
-                    setActiveIndex((prev) => (prev <= 0 ? maxStartIndex : prev - 1))
-                  }
+                  onClick={() => {
+                    goPrev();
+                    setPaused(true);
+                    setTimeout(() => setPaused(false), 4000);
+                  }}
                   aria-label="Previous reviews"
-                  className="p-2.5 rounded-xl border border-[#DADCE0] bg-white hover:bg-[#F8F9FA] text-[#202124] transition-colors"
+                  className="p-2.5 rounded-xl border border-[#DADCE0] bg-white hover:bg-[#F8F9FA] text-[#202124] transition-colors shadow-xs cursor-pointer hover:border-[#0B8F4D]"
                 >
                   <ChevronLeft className="w-4 h-4" />
                 </button>
                 <button
                   type="button"
-                  onClick={() =>
-                    setActiveIndex((prev) => (prev >= maxStartIndex ? 0 : prev + 1))
-                  }
+                  onClick={() => {
+                    goNext();
+                    setPaused(true);
+                    setTimeout(() => setPaused(false), 4000);
+                  }}
                   aria-label="Next reviews"
-                  className="p-2.5 rounded-xl border border-[#DADCE0] bg-white hover:bg-[#F8F9FA] text-[#202124] transition-colors"
+                  className="p-2.5 rounded-xl border border-[#DADCE0] bg-white hover:bg-[#F8F9FA] text-[#202124] transition-colors shadow-xs cursor-pointer hover:border-[#0B8F4D]"
                 >
                   <ChevronRight className="w-4 h-4" />
                 </button>
@@ -358,8 +406,20 @@ export function AboveFooterGoogleReviewsSection() {
           </div>
         </div>
 
-        {/* Auto-Sliding Reviews Viewport with Soft Edge Fades */}
-        <div className="relative overflow-hidden">
+        {/* Auto-Sliding Reviews Viewport with Drag & Swipe Support */}
+        <div
+          className="relative overflow-hidden cursor-grab active:cursor-grabbing select-none"
+          onTouchStart={handleTouchStart}
+          onTouchMove={handleTouchMove}
+          onTouchEnd={handleTouchEnd}
+          onMouseDown={handleTouchStart}
+          onMouseMove={isDragging ? handleTouchMove : undefined}
+          onMouseUp={handleTouchEnd}
+          onMouseLeave={() => {
+            if (isDragging) handleTouchEnd();
+            setPaused(false);
+          }}
+        >
           <div
             aria-hidden="true"
             className="pointer-events-none hidden sm:block absolute inset-y-0 left-0 w-8 z-10 bg-gradient-to-r from-[#F8FAF9] to-transparent"
@@ -369,9 +429,10 @@ export function AboveFooterGoogleReviewsSection() {
             className="pointer-events-none hidden sm:block absolute inset-y-0 right-0 w-8 z-10 bg-gradient-to-l from-[#F8FAF9] to-transparent"
           />
           <div
-            className="flex transition-transform duration-700 ease-out -mx-2.5"
+            className={`flex ${isDragging ? '' : 'transition-transform duration-500 ease-out'} -mx-2.5`}
             style={{
-              transform: `translateX(-${activeIndex * (100 / cardsPerView)}%)`,
+              width: `${(reviewsList.length * 100) / cardsPerView}%`,
+              transform: `translateX(calc(-${(activeIndex * 100) / reviewsList.length}% + ${touchDeltaX}px))`,
             }}
           >
             {reviewsList.map((rev, idx) => {
@@ -382,7 +443,7 @@ export function AboveFooterGoogleReviewsSection() {
                 <div
                   key={rev.id}
                   className="px-2.5 shrink-0"
-                  style={{ width: `${100 / cardsPerView}%` }}
+                  style={{ width: `${100 / reviewsList.length}%` }}
                 >
                   <article className="bg-white rounded-2xl border border-[#EAECEF] p-6 h-full flex flex-col justify-between shadow-xs hover:border-[#0B8F4D]/35 transition-colors">
                     <div>
@@ -485,20 +546,38 @@ export function AboveFooterGoogleReviewsSection() {
           </div>
         </div>
 
-        {/* Slide Progress Dots */}
+        {/* Slide Progress Dots, Counter & Swipe Tip */}
         {maxStartIndex > 0 && (
-          <div className="flex items-center justify-center gap-1.5 mt-6">
-            {Array.from({ length: maxStartIndex + 1 }).map((_, idx) => (
-              <button
-                key={idx}
-                type="button"
-                onClick={() => setActiveIndex(idx)}
-                aria-label={`Go to review slide ${idx + 1}`}
-                className={`h-1.5 rounded-full transition-all duration-300 ${
-                  activeIndex === idx ? 'w-7 bg-[#0B8F4D]' : 'w-2 bg-[#CFD8D3] hover:bg-[#9AA9A1]'
-                }`}
-              />
-            ))}
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 mt-6 pt-2">
+            <p className="text-xs text-[#5F6368] font-medium">
+              Showing <strong className="text-[#202124] font-num">{activeIndex + 1}</strong>–
+              <strong className="text-[#202124] font-num">
+                {Math.min(activeIndex + cardsPerView, reviewsList.length)}
+              </strong>{' '}
+              of <strong className="text-[#202124] font-num">{reviewsList.length}</strong> Google reviews
+            </p>
+            <div className="flex items-center gap-1.5">
+              {Array.from({ length: maxStartIndex + 1 }).map((_, idx) => (
+                <button
+                  key={idx}
+                  type="button"
+                  onClick={() => {
+                    setActiveIndex(idx);
+                    setPaused(true);
+                    setTimeout(() => setPaused(false), 4000);
+                  }}
+                  aria-label={`Go to review slide ${idx + 1}`}
+                  className={`h-2 rounded-full transition-all duration-300 cursor-pointer ${
+                    activeIndex === idx
+                      ? 'w-7 bg-[#0B8F4D]'
+                      : 'w-2 bg-[#CFD8D3] hover:bg-[#9AA9A1]'
+                  }`}
+                />
+              ))}
+            </div>
+            <div className="text-[11px] font-medium text-[#777777] hidden md:block">
+              ← Drag or swipe horizontally to slide →
+            </div>
           </div>
         )}
       </FadeIn>

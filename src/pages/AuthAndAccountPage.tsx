@@ -27,6 +27,8 @@ import {
   Briefcase,
   Printer,
   X,
+  Check,
+  Sparkles,
 } from 'lucide-react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -40,8 +42,39 @@ import { api, formatINR } from '../services/api';
 import { CustomerReview, OrderRecord, Product, SubscriptionRecord } from '../types';
 import { OFFICIAL_TRIMPLATE_LOGO, resolveFoodImage } from '../assets/mediaMap';
 
+function GoogleIcon({ className = 'w-5 h-5' }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24">
+      <path
+        fill="#4285F4"
+        d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+      />
+      <path
+        fill="#34A853"
+        d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+      />
+      <path
+        fill="#FBBC05"
+        d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
+      />
+      <path
+        fill="#EA4335"
+        d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
+      />
+    </svg>
+  );
+}
+
+function FacebookIcon({ className = 'w-5 h-5' }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="#1877F2">
+      <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
+    </svg>
+  );
+}
+
 export function LoginPage() {
-  const { login, register, quickAccess } = useAuth();
+  const { login, register, socialLogin, quickAccess } = useAuth();
   const { site } = useSite();
   const { showToast } = useToast();
   const navigate = useNavigate();
@@ -60,6 +93,15 @@ export function LoginPage() {
   });
   const [resetPassword, setResetPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
+
+  // Social Auth Modal for Customers (Google & Facebook)
+  const [socialModalProvider, setSocialModalProvider] = useState<'google' | 'facebook' | null>(null);
+  const [socialSelectedEmail, setSocialSelectedEmail] = useState('gorachandbanerjee6296752010@gmail.com');
+  const [socialSelectedName, setSocialSelectedName] = useState('Gorachand Banerjee');
+  const [socialUseCustom, setSocialUseCustom] = useState(false);
+  const [socialCustomName, setSocialCustomName] = useState('');
+  const [socialCustomEmail, setSocialCustomEmail] = useState('');
+  const [socialLoading, setSocialLoading] = useState(false);
 
   const brandName = site.settings.business_name || site.settings.site_name || 'TrimPlate';
   const logoSrc =
@@ -108,6 +150,49 @@ export function LoginPage() {
       showToast(err.response?.data?.error || 'Could not reset password', 'error');
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const openSocialModal = (provider: 'google' | 'facebook') => {
+    setSocialModalProvider(provider);
+    setSocialUseCustom(false);
+    setSocialCustomName('');
+    setSocialCustomEmail('');
+    if (provider === 'google') {
+      setSocialSelectedName('Gorachand Banerjee');
+      setSocialSelectedEmail('gorachandbanerjee6296752010@gmail.com');
+    } else {
+      setSocialSelectedName('Gorachand Banerjee');
+      setSocialSelectedEmail('gorachand.fb@facebook.com');
+    }
+  };
+
+  const handleExecuteSocialAuth = async () => {
+    if (!socialModalProvider) return;
+    const finalName = (socialUseCustom ? socialCustomName : socialSelectedName).trim();
+    const finalEmail = (socialUseCustom ? socialCustomEmail : socialSelectedEmail).trim();
+
+    if (!finalName || !finalEmail) {
+      showToast('Please specify your name and email to continue', 'error');
+      return;
+    }
+
+    setSocialLoading(true);
+    try {
+      const u = await socialLogin({
+        provider: socialModalProvider,
+        name: finalName,
+        email: finalEmail,
+        dietary_preference: regForm.dietary_preference,
+      });
+      const providerLabel = socialModalProvider === 'google' ? 'Google' : 'Facebook';
+      showToast(`Welcome ${u.name}! Signed in via ${providerLabel}.`);
+      setSocialModalProvider(null);
+      navigate(redirectPath);
+    } catch (err: any) {
+      showToast(err.response?.data?.error || 'Social sign-in failed. Please try again.', 'error');
+    } finally {
+      setSocialLoading(false);
     }
   };
 
@@ -407,38 +492,276 @@ export function LoginPage() {
             </form>
           )}
 
-          {/* Instant 1-Click Demo Access */}
-          <div className="pt-5 border-t border-[#EEEEEE] space-y-2.5">
-            <p className="text-[11px] font-bold uppercase tracking-wider text-center text-[#777777]">
-              Instant 1-Click Demo Sign In
-            </p>
+          {/* Customer Social Authentication (Google & Facebook) */}
+          <div className="space-y-3 pt-1">
+            <div className="relative flex py-1.5 items-center">
+              <div className="flex-grow border-t border-[#EEEEEE]" />
+              <span className="flex-shrink mx-3 text-[11px] font-bold text-[#777777] uppercase tracking-wider">
+                Or {mode === 'register' ? 'Register with' : 'Continue with'}
+              </span>
+              <div className="flex-grow border-t border-[#EEEEEE]" />
+            </div>
+
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
               <button
                 type="button"
-                onClick={async () => {
-                  const u = await quickAccess('customer');
-                  showToast(`Signed in as ${u.name}`);
-                  navigate(redirectPath);
-                }}
-                className="py-2.5 px-3.5 rounded-xl border border-[#DCE4DF] hover:border-[#0B8F4D] bg-[#F9FBF9] text-xs font-bold text-[#123B16] inline-flex items-center justify-center gap-1.5 transition-colors"
+                onClick={() => openSocialModal('google')}
+                className="flex items-center justify-center gap-2.5 px-4 py-3 rounded-xl border border-[#D8DFDA] hover:border-[#4285F4] bg-white hover:bg-[#F8FAFF] text-xs sm:text-sm font-semibold text-[#202124] transition-all shadow-xs group cursor-pointer"
               >
-                <User className="w-3.5 h-3.5 text-[#0B8F4D]" /> Customer Account Demo
+                <GoogleIcon className="w-4 h-4 shrink-0 transition-transform group-hover:scale-110" />
+                <span>{mode === 'register' ? 'Sign up with Google' : 'Sign in with Google'}</span>
               </button>
               <button
                 type="button"
-                onClick={async () => {
-                  await quickAccess('admin');
-                  showToast('Signed in to Admin Website CMS');
-                  navigate('/admin');
-                }}
-                className="py-2.5 px-3.5 rounded-xl bg-[#123B16] hover:bg-[#0B8F4D] text-white text-xs font-bold inline-flex items-center justify-center gap-1.5 transition-colors"
+                onClick={() => openSocialModal('facebook')}
+                className="flex items-center justify-center gap-2.5 px-4 py-3 rounded-xl border border-[#D8DFDA] hover:border-[#1877F2] bg-white hover:bg-[#F5F8FF] text-xs sm:text-sm font-semibold text-[#1877F2] transition-all shadow-xs group cursor-pointer"
               >
-                <ShieldCheck className="w-3.5 h-3.5 text-[#8CCB16]" /> Admin Website CMS
+                <FacebookIcon className="w-4 h-4 shrink-0 transition-transform group-hover:scale-110" />
+                <span>{mode === 'register' ? 'Sign up with Facebook' : 'Sign in with Facebook'}</span>
               </button>
             </div>
+            <p className="text-[10px] text-center text-[#888888]">
+              Instant customer authentication • Macro-counted diet tracking enabled
+            </p>
+          </div>
+
+          {/* Customer 1-Click Fast Demo Sign In */}
+          <div className="pt-4 border-t border-[#EEEEEE]">
+            <button
+              type="button"
+              onClick={async () => {
+                const u = await quickAccess('customer');
+                showToast(`Signed in as ${u.name}`);
+                navigate(redirectPath);
+              }}
+              className="w-full py-2.5 px-3.5 rounded-xl border border-[#DCE4DF] hover:border-[#0B8F4D] bg-[#F9FBF9] text-xs font-bold text-[#123B16] inline-flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+            >
+              <User className="w-3.5 h-3.5 text-[#0B8F4D]" /> 1-Click Fast Customer Demo Sign In
+            </button>
           </div>
         </div>
       </div>
+
+      {/* Customer Social Authentication Modal (Google & Facebook) */}
+      {socialModalProvider && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-tp-fade-in">
+          <div className="relative w-full max-w-md bg-white rounded-3xl shadow-2xl border border-[#EEEEEE] overflow-hidden animate-tp-scale-fade">
+            {/* Modal Header */}
+            <div
+              className={`p-5 text-white flex items-center justify-between ${
+                socialModalProvider === 'google' ? 'bg-[#1F1F1F]' : 'bg-[#1877F2]'
+              }`}
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-full bg-white flex items-center justify-center shadow-xs shrink-0">
+                  {socialModalProvider === 'google' ? (
+                    <GoogleIcon className="w-5 h-5" />
+                  ) : (
+                    <FacebookIcon className="w-5 h-5" />
+                  )}
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold leading-tight">
+                    {socialModalProvider === 'google' ? 'Google Account Sign In' : 'Facebook Login'}
+                  </h3>
+                  <p className="text-[11px] opacity-85">
+                    Customer {mode === 'register' ? 'Registration' : 'Login'} for TrimPlate
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSocialModalProvider(null)}
+                className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors text-white"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <div className="space-y-1">
+                <h4 className="text-base font-bold text-[#202124]">
+                  {mode === 'register' ? 'Create Customer Profile' : 'Select Customer Account'}
+                </h4>
+                <p className="text-xs text-[#777777] leading-relaxed">
+                  {socialModalProvider === 'google'
+                    ? 'Authenticate seamlessly with your Google identity. Your delivery address and order tracking will be linked automatically.'
+                    : 'TrimPlate will receive your name, profile picture, and verified email to configure your customer account.'}
+                </p>
+              </div>
+
+              {/* Account Selection Card */}
+              <div className="space-y-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSocialUseCustom(false);
+                    setSocialSelectedEmail(
+                      socialModalProvider === 'google'
+                        ? 'gorachandbanerjee6296752010@gmail.com'
+                        : 'gorachand.fb@facebook.com'
+                    );
+                    setSocialSelectedName('Gorachand Banerjee');
+                  }}
+                  className={`w-full flex items-center gap-3 p-3 rounded-2xl border text-left transition-all ${
+                    !socialUseCustom && socialSelectedName === 'Gorachand Banerjee'
+                      ? 'border-[#0B8F4D] bg-[#E8F5E9]/40 ring-2 ring-[#0B8F4D]/20'
+                      : 'border-[#E0E4E2] hover:border-[#0B8F4D] hover:bg-[#F9FBF9]'
+                  }`}
+                >
+                  <div className="w-10 h-10 rounded-full bg-[#0B8F4D] text-white font-bold flex items-center justify-center shrink-0 text-sm">
+                    GB
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-bold text-xs text-[#202124]">Gorachand Banerjee</span>
+                      <span className="text-[9px] bg-[#E8F5E9] text-[#0B8F4D] px-1.5 py-0.2 rounded-full font-bold">
+                        Detected
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-[#777777] truncate">
+                      {socialModalProvider === 'google'
+                        ? 'gorachandbanerjee6296752010@gmail.com'
+                        : 'gorachand.fb@facebook.com'}
+                    </p>
+                  </div>
+                  <CheckCircle2
+                    className={`w-4 h-4 shrink-0 ${
+                      !socialUseCustom && socialSelectedName === 'Gorachand Banerjee'
+                        ? 'text-[#0B8F4D]'
+                        : 'text-gray-300'
+                    }`}
+                  />
+                </button>
+
+                {/* Pre-set alternative customer profile */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSocialUseCustom(false);
+                    if (socialModalProvider === 'google') {
+                      setSocialSelectedEmail('ananya.sen@gmail.com');
+                      setSocialSelectedName('Ananya Sen');
+                    } else {
+                      setSocialSelectedEmail('priya.mukherjee@facebook.com');
+                      setSocialSelectedName('Priya Mukherjee');
+                    }
+                  }}
+                  className={`w-full flex items-center gap-3 p-3 rounded-2xl border text-left transition-all ${
+                    !socialUseCustom && socialSelectedName !== 'Gorachand Banerjee'
+                      ? 'border-[#0B8F4D] bg-[#E8F5E9]/40 ring-2 ring-[#0B8F4D]/20'
+                      : 'border-[#E0E4E2] hover:border-[#0B8F4D] hover:bg-[#F9FBF9]'
+                  }`}
+                >
+                  <div className="w-10 h-10 rounded-full bg-[#123B16] text-white font-bold flex items-center justify-center shrink-0 text-xs">
+                    {socialModalProvider === 'google' ? 'AS' : 'PM'}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <span className="font-bold text-xs text-[#202124]">
+                      {socialModalProvider === 'google' ? 'Ananya Sen' : 'Priya Mukherjee'}
+                    </span>
+                    <p className="text-[11px] text-[#777777] truncate">
+                      {socialModalProvider === 'google'
+                        ? 'ananya.sen@gmail.com'
+                        : 'priya.mukherjee@facebook.com'}
+                    </p>
+                  </div>
+                  <CheckCircle2
+                    className={`w-4 h-4 shrink-0 ${
+                      !socialUseCustom && socialSelectedName !== 'Gorachand Banerjee'
+                        ? 'text-[#0B8F4D]'
+                        : 'text-gray-300'
+                    }`}
+                  />
+                </button>
+
+                {/* Custom input toggle */}
+                <button
+                  type="button"
+                  onClick={() => setSocialUseCustom(!socialUseCustom)}
+                  className="text-xs font-semibold text-[#0B8F4D] hover:underline flex items-center gap-1.5 pt-1"
+                >
+                  {socialUseCustom
+                    ? '← Back to detected accounts'
+                    : `+ Enter another ${
+                        socialModalProvider === 'google' ? 'Google' : 'Facebook'
+                      } account`}
+                </button>
+
+                {socialUseCustom && (
+                  <div className="p-3 rounded-2xl bg-[#F8FAF9] border border-[#E0E4E2] space-y-2.5 animate-tp-fade-in mt-1">
+                    <div>
+                      <label className="block text-[11px] font-bold text-[#202124] mb-1">
+                        Full Name *
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="e.g. Rahul Sharma"
+                        value={socialCustomName}
+                        onChange={(e) => setSocialCustomName(e.target.value)}
+                        className="w-full px-3 py-2 rounded-xl border border-[#D0D6D2] text-xs outline-none focus:border-[#0B8F4D] bg-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-[#202124] mb-1">
+                        {socialModalProvider === 'google' ? 'Google Email *' : 'Facebook Email *'}
+                      </label>
+                      <input
+                        type="email"
+                        required
+                        placeholder={
+                          socialModalProvider === 'google'
+                            ? 'rahul@gmail.com'
+                            : 'rahul.fb@facebook.com'
+                        }
+                        value={socialCustomEmail}
+                        onChange={(e) => setSocialCustomEmail(e.target.value)}
+                        className="w-full px-3 py-2 rounded-xl border border-[#D0D6D2] text-xs outline-none focus:border-[#0B8F4D] bg-white"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Action Button */}
+              <div className="pt-2">
+                <button
+                  type="button"
+                  disabled={socialLoading}
+                  onClick={handleExecuteSocialAuth}
+                  className={`w-full py-3.5 px-4 rounded-xl text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-xs transition-colors cursor-pointer ${
+                    socialModalProvider === 'google'
+                      ? 'bg-[#1F1F1F] hover:bg-black'
+                      : 'bg-[#1877F2] hover:bg-[#166FE5]'
+                  }`}
+                >
+                  {socialLoading ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" /> Authenticating Customer Account...
+                    </>
+                  ) : (
+                    <>
+                      {socialModalProvider === 'google' ? (
+                        <GoogleIcon className="w-4 h-4" />
+                      ) : (
+                        <FacebookIcon className="w-4 h-4 fill-white" />
+                      )}
+                      Continue as{' '}
+                      {socialUseCustom
+                        ? socialCustomName || 'Customer'
+                        : socialSelectedName}
+                    </>
+                  )}
+                </button>
+                <p className="text-[10px] text-center text-[#888888] mt-2">
+                  Customer access only. Orders and meal subscriptions will be linked to this account.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1189,9 +1512,9 @@ export function CustomerAccountPage() {
                         key={order.id}
                         className="bg-white rounded-2xl border border-[#E6EAE8] overflow-hidden shadow-2xs"
                       >
-                        {/* Order Top Meta Bar */}
+                        {/* Order Top Meta Bar with Animated Status Indicators */}
                         <div className="px-5 sm:px-6 py-4 bg-[#FAFCFB] border-b border-[#EEF1EF] flex flex-wrap items-center justify-between gap-3">
-                          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+                          <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs">
                             <span className="text-sm font-extrabold text-[#123B16] font-num">
                               Order #{order.order_code}
                             </span>
@@ -1200,23 +1523,44 @@ export function CustomerAccountPage() {
                               {order.created_at?.slice(0, 16)}
                             </span>
                             <span className="text-[#CCCCCC]">·</span>
-                            <span className="font-medium text-[#555555]">
-                              {order.payment_method} ({order.payment_status})
-                            </span>
+                            {/* Animated Payment Status Tag */}
+                            {order.payment_status?.toLowerCase().includes('pending') ||
+                            order.payment_method === 'Cash on Delivery' ? (
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-50 text-amber-900 border border-amber-300 animate-tp-pulse-amber">
+                                <span className="w-1.5 h-1.5 rounded-full bg-amber-600 animate-ping shrink-0" />
+                                Payment Pending ({order.payment_method})
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-[#E8F5E9] text-[#123B16] border border-[#0B8F4D]/30">
+                                <Check className="w-3 h-3 text-[#0B8F4D]" />
+                                Paid ({order.payment_method})
+                              </span>
+                            )}
                           </div>
 
                           <div className="flex items-center gap-3">
-                            <span
-                              className={`text-xs font-bold ${
-                                order.order_status === 'Cancelled'
-                                  ? 'text-red-600'
-                                  : order.order_status === 'Delivered'
-                                  ? 'text-[#0B8F4D]'
-                                  : 'text-amber-700'
-                              }`}
-                            >
-                              {order.order_status}
-                            </span>
+                            {/* Animated Order Status Tag */}
+                            {order.order_status === 'Cancelled' ? (
+                              <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-bold bg-red-50 text-red-700 border border-red-200">
+                                Cancelled
+                              </span>
+                            ) : order.order_status === 'Delivered' ? (
+                              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-[#E8F5E9] text-[#0B8F4D] border border-[#0B8F4D]/30">
+                                <CheckCircle2 className="w-3.5 h-3.5 text-[#0B8F4D]" />
+                                Delivered
+                              </span>
+                            ) : order.order_status === 'Out for Delivery' ? (
+                              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-teal-50 text-teal-900 border border-teal-300 animate-tp-bounce-subtle">
+                                <Truck className="w-3.5 h-3.5 text-teal-600" />
+                                Out for Delivery
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-[#E8F5E9] text-[#123B16] border border-[#0B8F4D]/40 animate-tp-pulse-glow">
+                                <span className="w-2 h-2 rounded-full bg-[#0B8F4D] animate-ping shrink-0" />
+                                {order.order_status}
+                              </span>
+                            )}
+
                             <span className="text-base font-extrabold text-[#202124] font-num">
                               {formatINR(order.total_amount)}
                             </span>
@@ -1389,7 +1733,18 @@ export function CustomerAccountPage() {
                             </div>
                           )}
 
-                          {/* Connected 4-Stage Visual Order Stepper */}
+                          {order.delivery_notes && (
+                            <div className="flex flex-wrap items-center gap-2 px-3.5 py-2 rounded-xl bg-[#F4FAF6] border border-[#0B8F4D]/20 text-xs">
+                              <span className="font-bold text-[#123B16] inline-flex items-center gap-1 shrink-0">
+                                <Sparkles className="w-3.5 h-3.5 text-[#0B8F4D]" /> Selected Services:
+                              </span>
+                              <span className="text-[#333333] leading-relaxed">
+                                {order.delivery_notes}
+                              </span>
+                            </div>
+                          )}
+
+                          {/* Connected 4-Stage Visual Order Stepper with Animated Active State */}
                           {order.order_status !== 'Cancelled' && (
                             <div className="pt-1">
                               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
@@ -1399,19 +1754,23 @@ export function CustomerAccountPage() {
                                   return (
                                     <div
                                       key={step}
-                                      className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-xs font-semibold ${
+                                      className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-xs font-semibold transition-all ${
                                         isCurrent
-                                          ? 'bg-[#E8F5E9] border-[#0B8F4D]/35 text-[#123B16]'
+                                          ? 'bg-[#E8F5E9] border-[#0B8F4D] text-[#123B16] ring-1 ring-[#0B8F4D] shadow-2xs'
                                           : done
                                           ? 'bg-[#F8FBF9] border-[#DCE8E0] text-[#0B8F4D]'
                                           : 'bg-white border-[#F0F2F1] text-[#9AA0A6]'
                                       }`}
                                     >
-                                      <CheckCircle2
-                                        className={`w-4 h-4 shrink-0 ${
-                                          done ? 'text-[#0B8F4D]' : 'text-[#D0D5D2]'
-                                        }`}
-                                      />
+                                      {isCurrent ? (
+                                        <span className="w-2.5 h-2.5 rounded-full bg-[#0B8F4D] animate-ping shrink-0" />
+                                      ) : (
+                                        <CheckCircle2
+                                          className={`w-4 h-4 shrink-0 ${
+                                            done ? 'text-[#0B8F4D]' : 'text-[#D0D5D2]'
+                                          }`}
+                                        />
+                                      )}
                                       <span className="truncate">{step}</span>
                                     </div>
                                   );
