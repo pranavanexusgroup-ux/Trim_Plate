@@ -1,0 +1,6 @@
+{
+  "name": "TrimPlate — Healthy Food Ordering & Diet Subscriptions",
+  "description": "Eat Smart. Stay Trim. Order fresh Cafe & Green Menu meals, high-protein gym bowls, sugar-control tiffins, and flexible daily diet subscriptions.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
