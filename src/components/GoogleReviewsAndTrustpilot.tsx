@@ -159,35 +159,74 @@ export function AboveFooterGoogleReviewsSection() {
     };
   }, [isEnabled, paused, modalOpen, reviewsList.length, cardsPerView, goNext]);
 
+  const touchStartRef = useRef<{ x: number; y: number; time: number } | null>(null);
+  const isHorizontalScrollRef = useRef<boolean | null>(null);
+
   const handleTouchStart = (e: React.TouchEvent | React.MouseEvent) => {
     setPaused(true);
     const clientX = 'touches' in e ? e.touches[0].clientX : (e as React.MouseEvent).clientX;
-    setTouchStartX(clientX);
+    const clientY = 'touches' in e ? e.touches[0].clientY : (e as React.MouseEvent).clientY;
+    touchStartRef.current = { x: clientX, y: clientY, time: Date.now() };
+    isHorizontalScrollRef.current = null;
     setTouchDeltaX(0);
-    setIsDragging(true);
+    setIsDragging(false);
   };
 
   const handleTouchMove = (e: React.TouchEvent | React.MouseEvent) => {
-    if (touchStartX === null) return;
+    if (!touchStartRef.current) return;
     const clientX = 'touches' in e ? e.touches[0].clientX : (e as React.MouseEvent).clientX;
-    const delta = clientX - touchStartX;
-    // Limit delta range for smooth dragging feel
-    setTouchDeltaX(Math.max(-120, Math.min(120, delta)));
+    const clientY = 'touches' in e ? e.touches[0].clientY : (e as React.MouseEvent).clientY;
+    const dx = clientX - touchStartRef.current.x;
+    const dy = clientY - touchStartRef.current.y;
+
+    if (isHorizontalScrollRef.current === null) {
+      if (Math.abs(dx) > 8 || Math.abs(dy) > 8) {
+        isHorizontalScrollRef.current = Math.abs(dx) >= Math.abs(dy);
+      }
+    }
+
+    if (isHorizontalScrollRef.current === true) {
+      setIsDragging(true);
+      let clampedDx = dx;
+      if ((activeIndex === 0 && dx > 0) || (activeIndex >= maxStartIndex && dx < 0)) {
+        clampedDx = dx * 0.35;
+      } else {
+        clampedDx = Math.max(-140, Math.min(140, dx));
+      }
+      setTouchDeltaX(clampedDx);
+    }
   };
 
-  const handleTouchEnd = () => {
-    if (touchStartX !== null) {
-      if (touchDeltaX < -35) {
+  const handleTouchEnd = useCallback(() => {
+    if (touchStartRef.current && isHorizontalScrollRef.current === true) {
+      const dt = Date.now() - touchStartRef.current.time;
+      const threshold = dt < 300 ? 25 : 50;
+      if (touchDeltaX < -threshold) {
         goNext();
-      } else if (touchDeltaX > 35) {
+      } else if (touchDeltaX > threshold) {
         goPrev();
       }
     }
-    setTouchStartX(null);
+    touchStartRef.current = null;
+    isHorizontalScrollRef.current = null;
     setTouchDeltaX(0);
     setIsDragging(false);
-    setTimeout(() => setPaused(false), 2500);
-  };
+    setTimeout(() => setPaused(false), 3500);
+  }, [touchDeltaX, goNext, goPrev]);
+
+  // Ensure dragging never gets stuck if mouse/touch is released outside the container
+  useEffect(() => {
+    if (!isDragging) return;
+    const handleGlobalRelease = () => {
+      handleTouchEnd();
+    };
+    window.addEventListener('mouseup', handleGlobalRelease);
+    window.addEventListener('touchend', handleGlobalRelease);
+    return () => {
+      window.removeEventListener('mouseup', handleGlobalRelease);
+      window.removeEventListener('touchend', handleGlobalRelease);
+    };
+  }, [isDragging, handleTouchEnd]);
 
   const isOrderItemReviewed = (
     orderId: number,
@@ -406,45 +445,75 @@ export function AboveFooterGoogleReviewsSection() {
           </div>
         </div>
 
-        {/* Auto-Sliding Reviews Viewport with Drag & Swipe Support */}
+        {/* Auto-Sliding Reviews Viewport with Drag & Swipe Support + Floating Navigation */}
         <div
-          className="relative overflow-hidden cursor-grab active:cursor-grabbing select-none"
+          className="relative group/reviews select-none py-1 touch-pan-y cursor-grab active:cursor-grabbing"
+          onMouseEnter={() => setPaused(true)}
+          onMouseLeave={() => setPaused(false)}
           onTouchStart={handleTouchStart}
           onTouchMove={handleTouchMove}
           onTouchEnd={handleTouchEnd}
           onMouseDown={handleTouchStart}
           onMouseMove={isDragging ? handleTouchMove : undefined}
           onMouseUp={handleTouchEnd}
-          onMouseLeave={() => {
-            if (isDragging) handleTouchEnd();
-            setPaused(false);
-          }}
         >
-          <div
-            aria-hidden="true"
-            className="pointer-events-none hidden sm:block absolute inset-y-0 left-0 w-8 z-10 bg-gradient-to-r from-[#F8FAF9] to-transparent"
-          />
-          <div
-            aria-hidden="true"
-            className="pointer-events-none hidden sm:block absolute inset-y-0 right-0 w-8 z-10 bg-gradient-to-l from-[#F8FAF9] to-transparent"
-          />
-          <div
-            className={`flex ${isDragging ? '' : 'transition-transform duration-500 ease-out'} -mx-2.5`}
-            style={{
-              width: `${(reviewsList.length * 100) / cardsPerView}%`,
-              transform: `translateX(calc(-${(activeIndex * 100) / reviewsList.length}% + ${touchDeltaX}px))`,
-            }}
-          >
-            {reviewsList.map((rev, idx) => {
-              const avatarStyle = AVATAR_PALETTE[idx % AVATAR_PALETTE.length];
-              const isGoogle = (rev.review_source || 'Google').toLowerCase() === 'google';
+          {/* Floating Previous Arrow Button — Desktop only, placed outside cards to prevent overlapping */}
+          {reviewsList.length > cardsPerView && (
+            <button
+              type="button"
+              onClick={() => {
+                goPrev();
+                setPaused(true);
+                setTimeout(() => setPaused(false), 4000);
+              }}
+              aria-label="Previous review cards"
+              className="hidden md:flex absolute -left-3 lg:-left-5 top-1/2 -translate-y-1/2 z-20 w-11 h-11 rounded-full bg-white/95 hover:bg-white text-[#123B16] hover:text-[#0B8F4D] shadow-lg border border-[#DCE4DF] items-center justify-center transition-all hover:scale-105 active:scale-95 cursor-pointer backdrop-blur-xs"
+            >
+              <ChevronLeft className="w-5 h-5" />
+            </button>
+          )}
 
-              return (
-                <div
-                  key={rev.id}
-                  className="px-2.5 shrink-0"
-                  style={{ width: `${100 / reviewsList.length}%` }}
-                >
+          {/* Floating Next Arrow Button — Desktop only, placed outside cards to prevent overlapping */}
+          {reviewsList.length > cardsPerView && (
+            <button
+              type="button"
+              onClick={() => {
+                goNext();
+                setPaused(true);
+                setTimeout(() => setPaused(false), 4000);
+              }}
+              aria-label="Next review cards"
+              className="hidden md:flex absolute -right-3 lg:-right-5 top-1/2 -translate-y-1/2 z-20 w-11 h-11 rounded-full bg-white/95 hover:bg-white text-[#123B16] hover:text-[#0B8F4D] shadow-lg border border-[#DCE4DF] items-center justify-center transition-all hover:scale-105 active:scale-95 cursor-pointer backdrop-blur-xs"
+            >
+              <ChevronRight className="w-5 h-5" />
+            </button>
+          )}
+
+          {/* Overflow Hidden Track Window */}
+          <div className="overflow-hidden rounded-2xl">
+            <div
+              className={`flex will-change-transform ${
+                isDragging ? '' : 'transition-transform duration-600 ease-[cubic-bezier(0.25,1,0.5,1)]'
+              }`}
+              style={{
+                transform:
+                  isDragging && touchDeltaX !== 0
+                    ? `translate3d(calc(-${(activeIndex * (100 / cardsPerView)).toFixed(4)}% ${
+                        touchDeltaX > 0 ? `+ ${touchDeltaX}px` : `- ${Math.abs(touchDeltaX)}px`
+                      }), 0, 0)`
+                    : `translate3d(-${(activeIndex * (100 / cardsPerView)).toFixed(4)}%, 0, 0)`,
+              }}
+            >
+              {reviewsList.map((rev, idx) => {
+                const avatarStyle = AVATAR_PALETTE[idx % AVATAR_PALETTE.length];
+                const isGoogle = (rev.review_source || 'Google').toLowerCase() === 'google';
+
+                return (
+                  <div
+                    key={rev.id}
+                    className="px-2 sm:px-3 shrink-0"
+                    style={{ width: `${100 / cardsPerView}%` }}
+                  >
                   <article className="bg-white rounded-2xl border border-[#EAECEF] p-6 h-full flex flex-col justify-between shadow-xs hover:border-[#0B8F4D]/35 transition-colors">
                     <div>
                       {/* Reviewer Top Row */}
@@ -545,6 +614,7 @@ export function AboveFooterGoogleReviewsSection() {
             })}
           </div>
         </div>
+      </div>
 
         {/* Slide Progress Dots, Counter & Swipe Tip */}
         {maxStartIndex > 0 && (

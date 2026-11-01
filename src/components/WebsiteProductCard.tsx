@@ -95,8 +95,10 @@ export function WebsiteProductCard({ product }: WebsiteProductCardProps) {
           aria-label={`View ${product.name}`}
         >
           <div
-            className="flex w-full h-full transition-transform duration-300 ease-out"
-            style={{ transform: `translateX(-${activeSlide * 100}%)` }}
+            className="flex w-full h-full will-change-transform transition-transform duration-350 ease-[cubic-bezier(0.25,1,0.5,1)]"
+            style={{
+              transform: `translate3d(-${activeSlide * 100}%, 0, 0)`,
+            }}
           >
             {galleryUrls.map((src, idx) => (
               <div key={`${src}-${idx}`} className="w-full h-full shrink-0 overflow-hidden">

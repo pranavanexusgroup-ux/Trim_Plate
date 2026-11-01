@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   ChevronLeft,
@@ -39,7 +39,14 @@ export function HomePage() {
   const navigate = useNavigate();
 
   const [products, setProducts] = useState<Product[]>(() => peekCached<Product[]>('/products') || []);
-  const [slideIdx, setSlideIdx] = useState(0);
+  const rawSlides = site.heroSlides;
+  const extendedSlides = useMemo(() => {
+    if (rawSlides.length <= 1) return rawSlides;
+    return [rawSlides[rawSlides.length - 1], ...rawSlides, rawSlides[0]];
+  }, [rawSlides]);
+
+  const [currentIndex, setCurrentIndex] = useState(1);
+  const [isTransitioning, setIsTransitioning] = useState(true);
   const [paused, setPaused] = useState(false);
   const [greenMealTab, setGreenMealTab] = useState<'Breakfast' | 'Lunch' | 'Snacks' | 'Dinner'>('Breakfast');
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
@@ -48,21 +55,110 @@ export function HomePage() {
   const [newsletterName, setNewsletterName] = useState('');
   const [submittingNews, setSubmittingNews] = useState(false);
 
+  const [heroDragDelta, setHeroDragDelta] = useState(0);
+  const [heroIsDragging, setHeroIsDragging] = useState(false);
+  const heroDragStartRef = useRef<{ x: number; y: number; time: number } | null>(null);
+  const heroIsHorizontalRef = useRef<boolean | null>(null);
+
+  const activeSlideIdx =
+    rawSlides.length > 0 ? (currentIndex - 1 + rawSlides.length) % rawSlides.length : 0;
+
+  const goNextHero = useCallback(() => {
+    if (rawSlides.length <= 1) return;
+    setIsTransitioning(true);
+    setCurrentIndex((prev) => prev + 1);
+  }, [rawSlides.length]);
+
+  const goPrevHero = useCallback(() => {
+    if (rawSlides.length <= 1) return;
+    setIsTransitioning(true);
+    setCurrentIndex((prev) => prev - 1);
+  }, [rawSlides.length]);
+
+  const handleHeroTransitionEnd = () => {
+    if (rawSlides.length <= 1) return;
+    if (currentIndex >= extendedSlides.length - 1) {
+      // Reached cloned first slide at end: snap seamlessly to real first slide (index 1) without animation
+      setIsTransitioning(false);
+      setCurrentIndex(1);
+    } else if (currentIndex <= 0) {
+      // Reached cloned last slide at start: snap seamlessly to real last slide without animation
+      setIsTransitioning(false);
+      setCurrentIndex(rawSlides.length);
+    }
+  };
+
+  const handleHeroStart = (clientX: number, clientY: number) => {
+    setPaused(true);
+    setIsTransitioning(false);
+    heroDragStartRef.current = { x: clientX, y: clientY, time: Date.now() };
+    heroIsHorizontalRef.current = null;
+    setHeroDragDelta(0);
+    setHeroIsDragging(false);
+  };
+
+  const handleHeroMove = (clientX: number, clientY: number) => {
+    if (!heroDragStartRef.current) return;
+    const dx = clientX - heroDragStartRef.current.x;
+    const dy = clientY - heroDragStartRef.current.y;
+
+    if (heroIsHorizontalRef.current === null) {
+      if (Math.abs(dx) > 8 || Math.abs(dy) > 8) {
+        heroIsHorizontalRef.current = Math.abs(dx) >= Math.abs(dy);
+      }
+    }
+
+    if (heroIsHorizontalRef.current === true) {
+      setHeroIsDragging(true);
+      setHeroDragDelta(dx);
+    }
+  };
+
+  const handleHeroEnd = useCallback(() => {
+    if (heroDragStartRef.current && heroIsHorizontalRef.current === true) {
+      const dt = Date.now() - heroDragStartRef.current.time;
+      const threshold = dt < 300 ? 30 : 60;
+      if (heroDragDelta < -threshold) {
+        goNextHero();
+      } else if (heroDragDelta > threshold) {
+        goPrevHero();
+      } else {
+        setIsTransitioning(true);
+      }
+    }
+    heroDragStartRef.current = null;
+    heroIsHorizontalRef.current = null;
+    setHeroDragDelta(0);
+    setHeroIsDragging(false);
+    setTimeout(() => setPaused(false), 4500);
+  }, [heroDragDelta, goNextHero, goPrevHero]);
+
+  useEffect(() => {
+    if (!heroIsDragging) return;
+    const handleGlobalHeroUp = () => {
+      handleHeroEnd();
+    };
+    window.addEventListener('mouseup', handleGlobalHeroUp);
+    window.addEventListener('touchend', handleGlobalHeroUp);
+    return () => {
+      window.removeEventListener('mouseup', handleGlobalHeroUp);
+      window.removeEventListener('touchend', handleGlobalHeroUp);
+    };
+  }, [heroIsDragging, handleHeroEnd]);
+
   useEffect(() => {
     cachedGet<Product[]>('/products', undefined, 60000)
       .then((data) => setProducts(data))
       .catch(() => {});
   }, []);
 
-  const slides = site.heroSlides;
-
   useEffect(() => {
-    if (slides.length <= 1 || paused) return;
+    if (rawSlides.length <= 1 || paused) return;
     const timer = setInterval(() => {
-      setSlideIdx((prev) => (prev + 1) % slides.length);
+      goNextHero();
     }, 5500);
     return () => clearInterval(timer);
-  }, [slides.length, paused]);
+  }, [rawSlides.length, paused, goNextHero]);
 
   const handleCopyCoupon = async (code: string, applyToBag = false) => {
     const clean = code.trim().toUpperCase();
@@ -830,7 +926,7 @@ export function HomePage() {
     }
   };
 
-  const activeSlide = slides[slideIdx] || slides[0];
+  const activeSlide = rawSlides[activeSlideIdx] || rawSlides[0];
   const heroLinkedProduct = activeSlide?.linked_product_id
     ? products.find((p) => p.id === Number(activeSlide.linked_product_id)) || null
     : null;
@@ -850,24 +946,65 @@ export function HomePage() {
     <div>
       <SEOHead />
 
-      {/* 1. Dynamic Full-Width Cross-Fade Hero Carousel (Supports Admin New Item & Offer Launches + Promo Codes) */}
-      {activeSlide && (
+      {/* 1. Dynamic Full-Width Horizontal Sliding Hero Carousel */}
+      {rawSlides.length > 0 && (
         <section
-          className="relative overflow-hidden bg-[#123B16]"
+          className="relative overflow-hidden bg-[#123B16] select-none touch-pan-y cursor-grab active:cursor-grabbing"
           onMouseEnter={() => setPaused(true)}
           onMouseLeave={() => setPaused(false)}
+          onTouchStart={(e) => handleHeroStart(e.touches[0].clientX, e.touches[0].clientY)}
+          onTouchMove={(e) => handleHeroMove(e.touches[0].clientX, e.touches[0].clientY)}
+          onTouchEnd={handleHeroEnd}
+          onMouseDown={(e) => {
+            if (e.button !== 0) return;
+            handleHeroStart(e.clientX, e.clientY);
+          }}
+          onMouseMove={heroIsDragging ? (e) => handleHeroMove(e.clientX, e.clientY) : undefined}
+          onMouseUp={handleHeroEnd}
+          onClickCapture={(e) => {
+            if (heroIsDragging || Math.abs(heroDragDelta) > 10) {
+              e.preventDefault();
+              e.stopPropagation();
+            }
+          }}
         >
-          <div className="relative min-h-[500px] sm:min-h-[560px] lg:min-h-[620px] flex items-center">
-            {/* Stacked Cross-Fading Slides */}
-            {slides.map((slide, idx) => {
-              const isCurrent = idx === slideIdx;
+          {/* Sliding Track with GPU acceleration, infinite seamless loop & buttery smooth easing */}
+          <div
+            className={`flex w-full will-change-transform ${
+              isTransitioning && !heroIsDragging
+                ? 'transition-transform duration-600 ease-[cubic-bezier(0.25,1,0.5,1)]'
+                : 'transition-none'
+            }`}
+            onTransitionEnd={handleHeroTransitionEnd}
+            style={{
+              transform:
+                heroIsDragging && heroDragDelta !== 0
+                  ? `translate3d(calc(-${currentIndex * 100}% ${
+                      heroDragDelta > 0 ? `+ ${heroDragDelta}px` : `- ${Math.abs(heroDragDelta)}px`
+                    }), 0, 0)`
+                  : `translate3d(-${currentIndex * 100}%, 0, 0)`,
+            }}
+          >
+            {extendedSlides.map((slide, sIdx) => {
+              const slideLinkedProduct = slide.linked_product_id
+                ? products.find((p) => p.id === Number(slide.linked_product_id)) || null
+                : null;
+              const slidePromoCode = String(slide.promo_code || '').trim().toUpperCase();
+              const slideDiscountVal = Number(slide.discount_value || 0);
+              const slideEyebrow =
+                slide.badge_text?.trim() ||
+                (slide.slide_type === 'new_launch'
+                  ? 'NEW ITEM LAUNCH'
+                  : slide.slide_type === 'offer_promo'
+                  ? 'LIMITED TIME OFFER'
+                  : `${site.settings.business_name || site.settings.site_name || 'TrimPlate'} · ${
+                      site.settings.tagline || 'Eat Smart. Stay Trim.'
+                    }`);
+
               return (
                 <div
-                  key={slide.id}
-                  aria-hidden={!isCurrent}
-                  className={`absolute inset-0 transition-opacity duration-1000 ease-in-out ${
-                    isCurrent ? 'opacity-100 z-0' : 'opacity-0 pointer-events-none'
-                  }`}
+                  key={`${slide.id}-${sIdx}`}
+                  className="w-full min-w-full shrink-0 relative min-h-[500px] sm:min-h-[560px] lg:min-h-[620px] flex items-center overflow-hidden"
                 >
                   <img
                     src={resolveFoodImage(slide.desktop_image)}
@@ -883,197 +1020,242 @@ export function HomePage() {
                     className="absolute inset-0 bg-[#0A220D]"
                     style={{ opacity: Number(slide.overlay_opacity ?? 0.55) }}
                   />
+
+                  {/* Soft Bottom Vignette Gradient Fade */}
+                  <div
+                    aria-hidden="true"
+                    className="pointer-events-none absolute inset-x-0 bottom-0 h-28 bg-gradient-to-t from-[#0A220D]/80 to-transparent z-[1]"
+                  />
+
+                  <div className="relative z-10 max-w-7xl mx-auto px-6 sm:px-16 lg:px-20 py-16 w-full">
+                    <div
+                      className={`max-w-2xl space-y-5 ${
+                        slide.text_position === 'center'
+                          ? 'mx-auto text-center'
+                          : slide.text_position === 'right'
+                          ? 'ml-auto text-right'
+                          : 'text-left'
+                      }`}
+                    >
+                      <span className="inline-flex items-center gap-2 text-xs font-bold uppercase tracking-[0.18em] text-[#8CCB16] bg-black/35 backdrop-blur-xs border border-white/20 px-3.5 py-1.5 rounded-lg">
+                        {(slide.slide_type === 'new_launch' ||
+                          slide.slide_type === 'offer_promo') && (
+                          <Sparkles className="w-3.5 h-3.5 text-[#8CCB16] shrink-0" />
+                        )}
+                        <span>{slideEyebrow}</span>
+                      </span>
+
+                      <h1 className="text-3xl sm:text-5xl lg:text-6xl font-extrabold text-white leading-[1.12] tracking-tight">
+                        {slide.title}
+                      </h1>
+
+                      {slide.subtitle && (
+                        <p className="text-base sm:text-lg text-white/90 leading-relaxed">
+                          {slide.subtitle}
+                        </p>
+                      )}
+
+                      {/* Admin-Managed Hero Promo Code & Discount Callout */}
+                      {slidePromoCode && (
+                        <div
+                          className={`inline-flex flex-wrap items-center gap-3 p-3 sm:px-4 sm:py-3 rounded-2xl bg-black/45 backdrop-blur-md border border-[#8CCB16]/45 text-white ${
+                            slide.text_position === 'center'
+                              ? 'mx-auto justify-center'
+                              : slide.text_position === 'right'
+                              ? 'ml-auto justify-end'
+                              : 'justify-start'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2 text-left">
+                            <span className="w-8 h-8 rounded-xl bg-[#0B8F4D] text-white flex items-center justify-center shrink-0">
+                              <Tag className="w-4 h-4" />
+                            </span>
+                            <div>
+                              <p className="text-xs font-extrabold text-[#8CCB16] uppercase tracking-wider font-num">
+                                {slideDiscountVal > 0
+                                  ? slide.discount_type === 'flat'
+                                    ? `Flat ₹${slideDiscountVal} OFF`
+                                    : `${slideDiscountVal}% OFF Launch Discount`
+                                  : 'Exclusive Promo Code'}
+                              </p>
+                              <p className="text-[11px] text-white/80 font-num">
+                                Use code <strong className="text-white">{slidePromoCode}</strong>
+                                {Number(slide.min_order_amount || 0) > 0
+                                  ? ` · Min order ₹${slide.min_order_amount}`
+                                  : ''}
+                              </p>
+                            </div>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => handleCopyCoupon(slidePromoCode, true)}
+                            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#8CCB16] hover:bg-white text-[#123B16] text-xs font-extrabold font-num transition-colors cursor-pointer"
+                          >
+                            {copiedCode === slidePromoCode ? (
+                              <>
+                                <Check className="w-3.5 h-3.5" /> Code Ready
+                              </>
+                            ) : (
+                              <>
+                                <Copy className="w-3.5 h-3.5" /> Copy {slidePromoCode}
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      )}
+
+                      <div
+                        className={`flex flex-wrap gap-3.5 pt-1 ${
+                          slide.text_position === 'center'
+                            ? 'justify-center'
+                            : slide.text_position === 'right'
+                            ? 'justify-end'
+                            : 'justify-start'
+                        }`}
+                      >
+                        {slideLinkedProduct && slideLinkedProduct.price !== null ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (slidePromoCode) {
+                                localStorage.setItem('tp_pending_promo', slidePromoCode);
+                              }
+                              addProductToCart(slideLinkedProduct, undefined, slideLinkedProduct.price!, 1);
+                              showToast(
+                                slidePromoCode
+                                  ? `${slideLinkedProduct.name} added! Promo ${slidePromoCode} saved for checkout.`
+                                  : `${slideLinkedProduct.name} added to your bag!`
+                              );
+                              setIsCartDrawerOpen(true);
+                            }}
+                            className="inline-flex items-center gap-2 bg-[#0B8F4D] hover:bg-[#09773F] text-white text-sm sm:text-base font-bold px-7 py-4 rounded-xl shadow-lg transition-colors cursor-pointer"
+                          >
+                            <ShoppingBag className="w-4 h-4" />
+                            {slide.cta_primary_text || 'Order New Launch'} ·{' '}
+                            <span className="font-num">{formatINR(slideLinkedProduct.price)}</span>
+                          </button>
+                        ) : (
+                          slide.cta_primary_text && (
+                            <Link
+                              to={slide.cta_primary_url || '/green-menu'}
+                              onClick={() => {
+                                if (slidePromoCode) {
+                                  localStorage.setItem('tp_pending_promo', slidePromoCode);
+                                }
+                              }}
+                              className="inline-flex items-center gap-2 bg-[#0B8F4D] hover:bg-[#09773F] text-white text-sm sm:text-base font-bold px-7 py-4 rounded-xl shadow-lg transition-colors"
+                            >
+                              {slide.cta_primary_text} <ArrowRight className="w-4 h-4" />
+                            </Link>
+                          )
+                        )}
+
+                        {slideLinkedProduct ? (
+                          <Link
+                            to={`/product/${slideLinkedProduct.slug}`}
+                            className="inline-flex items-center gap-2 bg-white/15 hover:bg-white/25 backdrop-blur-xs text-white border border-white/30 text-sm sm:text-base font-semibold px-7 py-4 rounded-xl transition-colors"
+                          >
+                            View Dish &amp; Macros
+                          </Link>
+                        ) : (
+                          slide.cta_secondary_text && (
+                            <Link
+                              to={slide.cta_secondary_url || '/subscriptions'}
+                              className="inline-flex items-center gap-2 bg-white/15 hover:bg-white/25 backdrop-blur-xs text-white border border-white/30 text-sm sm:text-base font-semibold px-7 py-4 rounded-xl transition-colors"
+                            >
+                              {slide.cta_secondary_text}
+                            </Link>
+                          )
+                        )}
+                      </div>
+                    </div>
+                  </div>
                 </div>
               );
             })}
+          </div>
 
-            {/* Soft Bottom Vignette Gradient Fade */}
-            <div
-              aria-hidden="true"
-              className="pointer-events-none absolute inset-x-0 bottom-0 h-28 bg-gradient-to-t from-[#0A220D]/80 to-transparent z-[1]"
-            />
-
-            <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16 w-full">
-              <div
-                key={activeSlide.id}
-                className={`max-w-2xl space-y-5 animate-tp-fade-up ${
-                  activeSlide.text_position === 'center'
-                    ? 'mx-auto text-center'
-                    : activeSlide.text_position === 'right'
-                    ? 'ml-auto text-right'
-                    : 'text-left'
-                }`}
+          {/* Carousel Controls — Zero-Overlap Responsive Layout */}
+          {rawSlides.length > 1 && (
+            <>
+              {/* Desktop-only floating arrows placed well outside text margins */}
+              <button
+                type="button"
+                onClick={() => {
+                  goPrevHero();
+                  setPaused(true);
+                  setTimeout(() => setPaused(false), 4500);
+                }}
+                className="hidden md:flex absolute left-4 sm:left-6 top-1/2 -translate-y-1/2 z-20 w-11 h-11 sm:w-12 sm:h-12 rounded-full bg-black/45 hover:bg-black/75 text-white items-center justify-center transition-all cursor-pointer shadow-lg backdrop-blur-xs hover:scale-105 active:scale-95"
+                aria-label="Previous slide"
               >
-                <span className="inline-flex items-center gap-2 text-xs font-bold uppercase tracking-[0.18em] text-[#8CCB16] bg-black/35 backdrop-blur-xs border border-white/20 px-3.5 py-1.5 rounded-lg">
-                  {(activeSlide.slide_type === 'new_launch' ||
-                    activeSlide.slide_type === 'offer_promo') && (
-                    <Sparkles className="w-3.5 h-3.5 text-[#8CCB16] shrink-0" />
-                  )}
-                  <span>{heroEyebrow}</span>
-                </span>
+                <ChevronLeft className="w-5 h-5 sm:w-6 sm:h-6" />
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  goNextHero();
+                  setPaused(true);
+                  setTimeout(() => setPaused(false), 4500);
+                }}
+                className="hidden md:flex absolute right-4 sm:right-6 top-1/2 -translate-y-1/2 z-20 w-11 h-11 sm:w-12 sm:h-12 rounded-full bg-black/45 hover:bg-black/75 text-white items-center justify-center transition-all cursor-pointer shadow-lg backdrop-blur-xs hover:scale-105 active:scale-95"
+                aria-label="Next slide"
+              >
+                <ChevronRight className="w-5 h-5 sm:w-6 sm:h-6" />
+              </button>
 
-                <h1 className="text-3xl sm:text-5xl lg:text-6xl font-extrabold text-white leading-[1.12] tracking-tight">
-                  {activeSlide.title}
-                </h1>
-
-                {activeSlide.subtitle && (
-                  <p className="text-base sm:text-lg text-white/90 leading-relaxed">
-                    {activeSlide.subtitle}
-                  </p>
-                )}
-
-                {/* Admin-Managed Hero Promo Code & Discount Callout */}
-                {heroPromoCode && (
-                  <div
-                    className={`inline-flex flex-wrap items-center gap-3 p-3 sm:px-4 sm:py-3 rounded-2xl bg-black/45 backdrop-blur-md border border-[#8CCB16]/45 text-white ${
-                      activeSlide.text_position === 'center'
-                        ? 'mx-auto justify-center'
-                        : activeSlide.text_position === 'right'
-                        ? 'ml-auto justify-end'
-                        : 'justify-start'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2 text-left">
-                      <span className="w-8 h-8 rounded-xl bg-[#0B8F4D] text-white flex items-center justify-center shrink-0">
-                        <Tag className="w-4 h-4" />
-                      </span>
-                      <div>
-                        <p className="text-xs font-extrabold text-[#8CCB16] uppercase tracking-wider font-num">
-                          {heroDiscountVal > 0
-                            ? activeSlide.discount_type === 'flat'
-                              ? `Flat ₹${heroDiscountVal} OFF`
-                              : `${heroDiscountVal}% OFF Launch Discount`
-                            : 'Exclusive Promo Code'}
-                        </p>
-                        <p className="text-[11px] text-white/80 font-num">
-                          Use code <strong className="text-white">{heroPromoCode}</strong>
-                          {Number(activeSlide.min_order_amount || 0) > 0
-                            ? ` · Min order ₹${activeSlide.min_order_amount}`
-                            : ''}
-                        </p>
-                      </div>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() => handleCopyCoupon(heroPromoCode, true)}
-                      className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#8CCB16] hover:bg-white text-[#123B16] text-xs font-extrabold font-num transition-colors"
-                    >
-                      {copiedCode === heroPromoCode ? (
-                        <>
-                          <Check className="w-3.5 h-3.5" /> Code Ready
-                        </>
-                      ) : (
-                        <>
-                          <Copy className="w-3.5 h-3.5" /> Copy {heroPromoCode}
-                        </>
-                      )}
-                    </button>
-                  </div>
-                )}
-
-                <div
-                  className={`flex flex-wrap gap-3.5 pt-1 ${
-                    activeSlide.text_position === 'center'
-                      ? 'justify-center'
-                      : activeSlide.text_position === 'right'
-                      ? 'justify-end'
-                      : 'justify-start'
-                  }`}
-                >
-                  {heroLinkedProduct && heroLinkedProduct.price !== null ? (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (heroPromoCode) {
-                          localStorage.setItem('tp_pending_promo', heroPromoCode);
-                        }
-                        addProductToCart(heroLinkedProduct, undefined, heroLinkedProduct.price!, 1);
-                        showToast(
-                          heroPromoCode
-                            ? `${heroLinkedProduct.name} added! Promo ${heroPromoCode} saved for checkout.`
-                            : `${heroLinkedProduct.name} added to your bag!`
-                        );
-                        setIsCartDrawerOpen(true);
-                      }}
-                      className="inline-flex items-center gap-2 bg-[#0B8F4D] hover:bg-[#09773F] text-white text-sm sm:text-base font-bold px-7 py-4 rounded-xl shadow-lg transition-colors"
-                    >
-                      <ShoppingBag className="w-4 h-4" />
-                      {activeSlide.cta_primary_text || 'Order New Launch'} ·{' '}
-                      <span className="font-num">{formatINR(heroLinkedProduct.price)}</span>
-                    </button>
-                  ) : (
-                    activeSlide.cta_primary_text && (
-                      <Link
-                        to={activeSlide.cta_primary_url || '/green-menu'}
-                        onClick={() => {
-                          if (heroPromoCode) {
-                            localStorage.setItem('tp_pending_promo', heroPromoCode);
-                          }
-                        }}
-                        className="inline-flex items-center gap-2 bg-[#0B8F4D] hover:bg-[#09773F] text-white text-sm sm:text-base font-bold px-7 py-4 rounded-xl shadow-lg transition-colors"
-                      >
-                        {activeSlide.cta_primary_text} <ArrowRight className="w-4 h-4" />
-                      </Link>
-                    )
-                  )}
-
-                  {heroLinkedProduct ? (
-                    <Link
-                      to={`/product/${heroLinkedProduct.slug}`}
-                      className="inline-flex items-center gap-2 bg-white/15 hover:bg-white/25 backdrop-blur-xs text-white border border-white/30 text-sm sm:text-base font-semibold px-7 py-4 rounded-xl transition-colors"
-                    >
-                      View Dish &amp; Macros
-                    </Link>
-                  ) : (
-                    activeSlide.cta_secondary_text && (
-                      <Link
-                        to={activeSlide.cta_secondary_url || '/subscriptions'}
-                        className="inline-flex items-center gap-2 bg-white/15 hover:bg-white/25 backdrop-blur-xs text-white border border-white/30 text-sm sm:text-base font-semibold px-7 py-4 rounded-xl transition-colors"
-                      >
-                        {activeSlide.cta_secondary_text}
-                      </Link>
-                    )
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* Carousel Controls */}
-            {slides.length > 1 && (
-              <>
+              {/* Bottom Navigation: Integrated Mobile Controls & Desktop Dots */}
+              <div className="absolute bottom-5 sm:bottom-6 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 sm:gap-3 bg-black/40 backdrop-blur-md px-3 sm:px-4 py-1.5 sm:py-2 rounded-full border border-white/20">
                 <button
                   type="button"
-                  onClick={() => setSlideIdx((prev) => (prev - 1 + slides.length) % slides.length)}
-                  className="hidden md:flex absolute left-5 top-1/2 -translate-y-1/2 z-20 w-11 h-11 rounded-full bg-black/35 hover:bg-black/60 text-white items-center justify-center transition-colors"
+                  onClick={() => {
+                    goPrevHero();
+                    setPaused(true);
+                    setTimeout(() => setPaused(false), 4500);
+                  }}
+                  className="md:hidden p-1 text-white/80 hover:text-white"
                   aria-label="Previous slide"
                 >
-                  <ChevronLeft className="w-5 h-5" />
+                  <ChevronLeft className="w-4 h-4" />
                 </button>
-                <button
-                  type="button"
-                  onClick={() => setSlideIdx((prev) => (prev + 1) % slides.length)}
-                  className="hidden md:flex absolute right-5 top-1/2 -translate-y-1/2 z-20 w-11 h-11 rounded-full bg-black/35 hover:bg-black/60 text-white items-center justify-center transition-colors"
-                  aria-label="Next slide"
-                >
-                  <ChevronRight className="w-5 h-5" />
-                </button>
-                <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2">
-                  {slides.map((sl, i) => (
+
+                <div className="flex items-center gap-1.5 sm:gap-2">
+                  {rawSlides.map((sl, i) => (
                     <button
                       key={sl.id}
                       type="button"
-                      onClick={() => setSlideIdx(i)}
+                      onClick={() => {
+                        setIsTransitioning(true);
+                        setCurrentIndex(i + 1);
+                        setPaused(true);
+                        setTimeout(() => setPaused(false), 4500);
+                      }}
                       aria-label={`Go to slide ${i + 1}`}
-                      className={`h-2 rounded-full transition-all ${
-                        i === slideIdx ? 'w-8 bg-[#8CCB16]' : 'w-2.5 bg-white/50 hover:bg-white/80'
+                      className={`h-2 sm:h-2.5 rounded-full transition-all duration-300 cursor-pointer ${
+                        i === activeSlideIdx
+                          ? 'w-7 sm:w-8 bg-[#8CCB16]'
+                          : 'w-2 sm:w-2.5 bg-white/45 hover:bg-white/75'
                       }`}
                     />
                   ))}
                 </div>
-              </>
-            )}
-          </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    goNextHero();
+                    setPaused(true);
+                    setTimeout(() => setPaused(false), 4500);
+                  }}
+                  className="md:hidden p-1 text-white/80 hover:text-white"
+                  aria-label="Next slide"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            </>
+          )}
         </section>
       )}
 

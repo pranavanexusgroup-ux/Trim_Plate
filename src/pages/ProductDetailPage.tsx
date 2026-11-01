@@ -356,8 +356,10 @@ export function ProductDetailPage() {
                   }
                 }}
                 aria-label={`Expand ${product.name} photo gallery`}
-                className="flex w-full h-full cursor-zoom-in transition-transform duration-300 ease-out"
-                style={{ transform: `translateX(-${safeSlideIdx * 100}%)` }}
+                className="flex w-full h-full cursor-zoom-in will-change-transform transition-transform duration-350 ease-[cubic-bezier(0.25,1,0.5,1)]"
+                style={{
+                  transform: `translate3d(-${safeSlideIdx * 100}%, 0, 0)`,
+                }}
               >
                 {gallerySources.map((src, idx) => (
                   <div key={`${src}-${idx}`} className="w-full h-full shrink-0 overflow-hidden">
